@@ -1,11 +1,20 @@
-﻿namespace DataScrapper.Backend.Models
+﻿using System;
+using System.ComponentModel.DataAnnotations;
+using System.Text.Json.Serialization;
+
+namespace DataScrapper.Backend.Models
 {
     public class User
     {
-        public long User_Id { get; set; }
-        public string User_Name { get; set; }
-        public string Email { get; set; }
-        public string Password_Hash { get; set; }
-        public DateTime Created_At { get; set; }
+        [Key]  // This tells EF Core that this is the primary key
+        public long user_id { get; set; }          // user_id (PK)
+
+        public string user_name { get; set; }      // user_name
+        public string email { get; set; }          // email
+        public string password_hash { get; set; }  // password_hash
+        public DateTime created_at { get; set; }   // created_at
+
+        [JsonIgnore]
+        public ICollection<Job>? Jobs { get; set; }
     }
 }

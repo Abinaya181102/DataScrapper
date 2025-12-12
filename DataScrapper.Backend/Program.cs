@@ -4,7 +4,7 @@ using DataScrapper.Backend.Models;
 var builder = WebApplication.CreateBuilder(args);
 
 // Database connection
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
+builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Add services
@@ -13,14 +13,14 @@ builder.Services.AddControllersWithViews();
 // Allow CORS for frontend (React)
 builder.Services.AddCors(options =>
 {
-    options.AddPolicy("AllowReactApp",
-        policy =>
-        {
-            policy.WithOrigins("http://localhost:3000") // React dev server
-                  .AllowAnyHeader()
-                  .AllowAnyMethod();
-        });
+    options.AddPolicy("AllowReactApp", policy =>
+    {
+        policy.AllowAnyOrigin()
+              .AllowAnyHeader()
+              .AllowAnyMethod();
+    });
 });
+
 
 var app = builder.Build();
 
