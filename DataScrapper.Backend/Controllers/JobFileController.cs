@@ -1,8 +1,8 @@
 ﻿using CsvHelper;
 using DataScrapper.Backend;
 using DataScrapper.Backend.Models;
-using UglyToad.PdfPig;
-using UglyToad.PdfPig.Content;
+using DocumentFormat.OpenXml.Packaging;
+using DocumentFormat.OpenXml.Wordprocessing;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -11,9 +11,14 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Xceed.Words.NET; // DocX
+using Syncfusion.Pdf.Parsing;
+using Syncfusion.Pdf;
+
 namespace DataScrapper.Backend.Controllers
 {
     [Route("api/[controller]")]
@@ -163,67 +168,191 @@ namespace DataScrapper.Backend.Controllers
         {
             var result = new List<Dictionary<string, string>>();
 
-            using (PdfDocument pdf = PdfDocument.Open(filePath))
+            // Load the PDF document
+            using FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+            using PdfLoadedDocument pdfDocument = new PdfLoadedDocument(fs);
+
+            // Extract text from all pages
+            StringBuilder fullTextBuilder = new StringBuilder();
+            foreach (PdfLoadedPage page in pdfDocument.Pages)
             {
-                foreach (var page in pdf.GetPages())
-                {
-                    string text = page.Text;
-                    var data = new Dictionary<string, string>();
-                    foreach (var field in mappingFields)
-                    {
-                        if (text.Contains(field))
-                            data[field] = ExtractFieldValue(text, field);
-                    }
-                    if (data.Count > 0)
-                        result.Add(data);
-                }
+                fullTextBuilder.AppendLine(page.ExtractText());
             }
 
+            string fullText = fullTextBuilder.ToString();
+
+            // Normalize whitespace
+            fullText = Regex.Replace(fullText, @"\s+", " ").Trim();
+
+            var data = new Dictionary<string, string>();
+
+            foreach (var field in mappingFields)
+            {
+                string value = ExtractFieldValue(fullText, field);
+                if (!string.IsNullOrWhiteSpace(value))
+                    data[field] = value;
+            }
+
+            if (data.Count > 0)
+                result.Add(data);
+
             return result;
+        }
+        private string ExtractFieldValue(string text, string fieldName)
+        {
+            if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(fieldName))
+                return "";
+
+            string pattern = $@"{Regex.Escape(fieldName)}\s*[:\-]?\s*(.+?)(?=\s+[A-Z][a-zA-Z ]{{2,}}|\s*$)";
+
+            var match = Regex.Match(text, pattern, RegexOptions.IgnoreCase);
+
+            if (match.Success)
+                return match.Groups[1].Value.Trim();
+
+            return "";
         }
 
         private List<Dictionary<string, string>> ExtractWord(string filePath, List<string> mappingFields)
         {
-            var result = new List<Dictionary<string, string>>();
-            using (var doc = DocX.Load(filePath))
+            if (mappingFields == null || mappingFields.Count == 0)
+                return new();
+
+            var mappingList = mappingFields
+                .Select(m => m.Trim())
+                .Where(m => !string.IsNullOrEmpty(m))
+                .ToList();
+
+            var normalizedMapping = mappingList
+                .ToDictionary(m => NormalizeKey(m), m => m);
+
+            var result = mappingList.ToDictionary(m => m, _ => string.Empty);
+
+            using var doc = WordprocessingDocument.Open(filePath, false);
+            var body = doc.MainDocumentPart?.Document?.Body;
+            if (body == null) return new();
+
+            var table = body.Descendants<Table>().FirstOrDefault();
+            if (table == null) return new();
+
+            string lastMatchedField = null;
+
+            foreach (var row in table.Elements<TableRow>().Skip(1)) // skip header row
             {
-                string text = doc.Text;
-                var data = new Dictionary<string, string>();
-                foreach (var field in mappingFields)
+                var cells = row.Elements<TableCell>().ToList();
+                if (cells.Count < 2) continue;
+
+                var label = CleanCell(cells[0]);
+
+                var value = string.Join(" ",
+                    cells.Skip(1).Select(c => CleanCell(c))
+                ).Trim();
+
+                if (string.IsNullOrWhiteSpace(value)) continue;
+
+                if (string.IsNullOrWhiteSpace(label) && lastMatchedField != null)
                 {
-                    if (text.Contains(field))
-                        data[field] = ExtractFieldValue(text, field);
+                    result[lastMatchedField] =
+                        (result[lastMatchedField] + " " + value).Trim();
+                    continue;
                 }
-                if (data.Count > 0)
-                    result.Add(data);
+
+                var labelNorm = NormalizeKey(label);
+
+                foreach (var map in normalizedMapping)
+                {
+                    if (labelNorm == map.Key || labelNorm.Contains(map.Key))
+                    {
+                        if (string.IsNullOrEmpty(result[map.Value]))
+                        {
+                            result[map.Value] = value;
+                            lastMatchedField = map.Value;
+                        }
+                        break;
+                    }
+                }
             }
-            return result;
+
+            if (result.Values.All(string.IsNullOrEmpty))
+                return new();
+
+            return new List<Dictionary<string, string>> { result };
+        }
+
+
+        // ================= HELPERS =================
+
+        private static string CleanCell(TableCell cell)
+        {
+            var txt = cell.InnerText ?? string.Empty;
+            txt = txt.Replace('\u00A0', ' ');
+            txt = Regex.Replace(txt, @"\s+", " ").Trim();
+            return txt;
+        }
+
+        private static string NormalizeKey(string s)
+        {
+            if (string.IsNullOrWhiteSpace(s)) return string.Empty;
+            s = s.Replace('\u00A0', ' ');
+            s = Regex.Replace(s, @"\s+", " ");
+            s = s.Trim().TrimEnd(':');
+            s = s.ToLowerInvariant();
+            s = Regex.Replace(s, @"[^a-z0-9\s]", "");
+            return s.Trim();
         }
 
         private List<Dictionary<string, string>> ExtractExcel(string filePath, List<string> mappingFields)
         {
             var result = new List<Dictionary<string, string>>();
 
-            using (var package = new ExcelPackage(filePath))
-            {
-                var sheet = package.Workbook.Worksheets.First();
-                int colCount = sheet.Dimension.End.Column;
-                int rowCount = sheet.Dimension.End.Row;
+            using var package = new ExcelPackage(new FileInfo(filePath));
+            var sheet = package.Workbook.Worksheets.First();
 
-                for (int row = 2; row <= rowCount; row++) // assuming first row header
+            int rows = sheet.Dimension.End.Row;
+            int cols = sheet.Dimension.End.Column;
+
+
+            // Normalize mapping fields
+            var normalizedMappings = mappingFields.ToDictionary(
+                m => Normalize(m),
+                m => m
+            );
+
+            for (int col = 1; col <= cols; col++)
+            {
+                var header = sheet.Cells[1, col].Text;
+            }
+
+            for (int row = 2; row <= rows; row++)
+            {
+                var data = new Dictionary<string, string>();
+
+                for (int col = 1; col <= cols; col++)
                 {
-                    var data = new Dictionary<string, string>();
-                    for (int col = 1; col <= colCount; col++)
+                    var header = sheet.Cells[1, col].Text;
+                    var value = sheet.Cells[row, col].Text;
+
+                    var normalizedHeader = Normalize(header);
+
+                    if (normalizedMappings.TryGetValue(normalizedHeader, out var originalKey))
                     {
-                        var header = sheet.Cells[1, col].Text;
-                        if (mappingFields.Contains(header))
-                            data[header] = sheet.Cells[row, col].Text;
+                        data[originalKey] = value;
                     }
-                    if (data.Count > 0)
-                        result.Add(data);
                 }
+
+                if (data.Count > 0)
+                    result.Add(data);
             }
             return result;
+        }
+
+        private string Normalize(string input)
+        {
+            if (string.IsNullOrWhiteSpace(input)) return "";
+
+            input = input.ToLowerInvariant();
+            input = Regex.Replace(input, @"[\s_\-\.]", "");
+            return input;
         }
 
         private List<Dictionary<string, string>> ExtractCsv(string filePath, List<string> mappingFields)
@@ -248,44 +377,6 @@ namespace DataScrapper.Backend.Controllers
             }
             return result;
         }
-
-        private string ExtractFieldValue(string text, string fieldName)
-        {
-            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(fieldName))
-                return "";
-
-            // Normalize whitespace: replace multiple spaces, tabs, newlines with a single space
-            text = System.Text.RegularExpressions.Regex.Replace(text, @"\s+", " ");
-
-            // Pattern: field name optionally followed by colon/dash, then capture value
-            // Stops at two or more spaces (common table separator), end of text, or a pipe '|'
-            string pattern = $@"{System.Text.RegularExpressions.Regex.Escape(fieldName)}\s*[:\-]?\s*(.+?)(?=\s{{2,}}|\||$)";
-
-            var match = System.Text.RegularExpressions.Regex.Match(text, pattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
-
-            if (match.Success)
-            {
-                string value = match.Groups[1].Value.Trim();
-                // Limit value length to avoid grabbing too much text accidentally
-                if (value.Length > 200) value = value.Substring(0, 200).Trim();
-                return value;
-            }
-
-            // Fallback: if fieldName is followed by a space, take next word or characters
-            int index = text.IndexOf(fieldName, StringComparison.OrdinalIgnoreCase);
-            if (index >= 0 && index + fieldName.Length < text.Length)
-            {
-                string remainder = text.Substring(index + fieldName.Length).TrimStart(':', '-', ' ');
-                int end = remainder.IndexOfAny(new char[] { ' ', '|', '\n', '\r' });
-                if (end > 0)
-                    remainder = remainder.Substring(0, end).Trim();
-                return remainder;
-            }
-
-            return ""; // Not found
-        }
-
-
 
 
         #endregion
