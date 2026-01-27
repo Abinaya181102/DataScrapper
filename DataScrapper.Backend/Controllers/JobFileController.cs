@@ -65,155 +65,377 @@ namespace DataScrapper.Backend.Controllers
 
         // POST: api/JobFile/upload
         [HttpPost("upload")]
-        public async Task<IActionResult> UploadFile([FromForm] IFormFile file, [FromForm] long job_id, [FromForm] string mappingJson)
+        public async Task<IActionResult> UploadFiles(
+            [FromForm] List<IFormFile> files,
+            [FromForm] long job_id,
+            [FromForm] string mappingJson)
         {
-            if (file == null || file.Length == 0)
-                return BadRequest("No file uploaded.");
+            if (files == null || files.Count == 0)
+                return BadRequest("No files uploaded.");
 
-            // Verify that the job exists
             var jobExists = await _context.Jobs.AnyAsync(j => j.job_id == job_id);
             if (!jobExists)
                 return BadRequest($"Job with ID {job_id} does not exist.");
-
-            // Save file temporarily
-            var tempPath = Path.Combine(Path.GetTempPath(), file.FileName);
-            using (var stream = new FileStream(tempPath, FileMode.Create))
-            {
-                await file.CopyToAsync(stream);
-            }
-
-            // Create JobFile record - only set job_id, do not assign Jobs navigation property
-            var jobFile = new JobFile
-            {
-                job_id = job_id,
-                original_file_name = file.FileName,
-                file_type = Path.GetExtension(file.FileName).ToLower(),
-                file_url = tempPath,
-                status = "processing",
-                created_at = DateTime.UtcNow
-            };
-
-            try
-            {
-                _context.JobFiles.Add(jobFile);
-                await _context.SaveChangesAsync();
-            }
-            catch (DbUpdateException dbEx)
-            {
-                return StatusCode(500, $"Database error while saving JobFile: {dbEx.InnerException?.Message ?? dbEx.Message}");
-            }
 
             // Parse mapping JSON
             List<string> mappingFields;
             try
             {
-                mappingFields = JsonSerializer.Deserialize<List<string>>(mappingJson) ?? new List<string>();
+                mappingFields = JsonSerializer.Deserialize<List<string>>(mappingJson) ?? new();
             }
             catch
             {
                 return BadRequest("Invalid mapping JSON.");
             }
 
-            // Extract data from file
-            List<Dictionary<string, string>> extractedData = new List<Dictionary<string, string>>();
-            try
+            var combinedExtractedData = new List<Dictionary<string, string>>();
+
+            foreach (var file in files)
             {
-                switch (jobFile.file_type)
+                if (file.Length == 0)
+                    continue;
+
+                var tempPath = Path.Combine(
+                    Path.GetTempPath(),
+                    $"{Guid.NewGuid()}_{file.FileName}"
+                );
+
+                using (var stream = new FileStream(tempPath, FileMode.Create))
                 {
-                    case ".pdf":
-                        extractedData = ExtractPdf(tempPath, mappingFields);
-                        break;
-                    case ".docx":
-                        extractedData = ExtractWord(tempPath, mappingFields);
-                        break;
-                    case ".xlsx":
-                        extractedData = ExtractExcel(tempPath, mappingFields);
-                        break;
-                    case ".csv":
-                        extractedData = ExtractCsv(tempPath, mappingFields);
-                        break;
-                    default:
-                        throw new Exception("Unsupported file type.");
+                    await file.CopyToAsync(stream);
                 }
 
-                jobFile.status = "completed";
-            }
-            catch (Exception ex)
-            {
-                jobFile.status = "failed";
-                jobFile.error_message = ex.Message;
-            }
+                var jobFile = new JobFile
+                {
+                    job_id = job_id,
+                    original_file_name = file.FileName,
+                    file_type = Path.GetExtension(file.FileName).ToLower(),
+                    file_url = tempPath,
+                    status = "processing",
+                    created_at = DateTime.UtcNow
+                };
 
-            // Save final status
-            try
-            {
+                _context.JobFiles.Add(jobFile);
+                await _context.SaveChangesAsync();
+
+                try
+                {
+                    List<Dictionary<string, string>> extractedData = jobFile.file_type switch
+                    {
+                        ".pdf" => ExtractPdf(tempPath, mappingFields),
+                        ".docx" => ExtractWord(tempPath, mappingFields),
+                        ".xlsx" => ExtractExcel(tempPath, mappingFields),
+                        ".csv" => ExtractCsv(tempPath, mappingFields),
+                        _ => throw new Exception("Unsupported file type")
+                    };
+
+                    // Add source file name for traceability
+                    foreach (var row in extractedData)
+                    {
+                        row["Source File"] = file.FileName;
+                        combinedExtractedData.Add(row);
+                    }
+
+                    jobFile.status = "completed";
+                }
+                catch (Exception ex)
+                {
+                    jobFile.status = "failed";
+                    jobFile.error_message = ex.Message;
+                }
+
                 await _context.SaveChangesAsync();
             }
-            catch (DbUpdateException dbEx)
-            {
-                return StatusCode(500, $"Database error while updating JobFile status: {dbEx.InnerException?.Message ?? dbEx.Message}");
-            }
 
-            // Generate Excel for extracted fields
-            var excelBytes = GenerateExcel(extractedData);
+            var excelBytes = GenerateExcel(combinedExtractedData);
 
-            return File(excelBytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                $"{Path.GetFileNameWithoutExtension(file.FileName)}_Extracted.xlsx");
+            return File(
+                excelBytes,
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                $"Job_{job_id}_Extracted.xlsx"
+            );
         }
 
 
         #region File Extractors
 
-        private List<Dictionary<string, string>> ExtractPdf(string filePath, List<string> mappingFields)
+        //private List<Dictionary<string, string>> ExtractPdf(string filePath, List<string> mappingFields)
+        //{
+        //    var result = new List<Dictionary<string, string>>();
+        //    if (mappingFields == null || mappingFields.Count == 0)
+        //        return result;
+
+        //    // Normalize mapping keys
+        //    var normalizedMapping = mappingFields.ToDictionary(m => Normalize(m), m => m);
+        //    var data = mappingFields.ToDictionary(f => f, _ => string.Empty);
+
+        //    using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+        //    using var pdfDocument = new PdfLoadedDocument(fs);
+
+        //    foreach (PdfLoadedPage page in pdfDocument.Pages)
+        //    {
+        //        // Extract all text from page
+        //        var text = page.ExtractText();
+
+        //        // Split text into lines
+        //        var lines = text.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+        //                        .Select(l => l.Trim())
+        //                        .Where(l => !string.IsNullOrEmpty(l))
+        //                        .ToList();
+
+        //        for (int i = 0; i < lines.Count; i++)
+        //        {
+        //            string line = lines[i];
+        //            string normalizedLine = Normalize(line);
+
+        //            foreach (var map in normalizedMapping)
+        //            {
+        //                if (!string.IsNullOrEmpty(data[map.Value])) continue;
+
+        //                // Case 1: Field: Value
+        //                int colonIndex = line.IndexOf(':');
+        //                if (colonIndex > 0 && normalizedLine.Contains(map.Key))
+        //                {
+        //                    data[map.Value] = line[(colonIndex + 1)..].Trim();
+        //                }
+        //                // Case 2: Field on one line, value on next line
+        //                else if (normalizedLine.Contains(map.Key) && i + 1 < lines.Count)
+        //                {
+        //                    data[map.Value] = lines[i + 1].Trim();
+        //                }
+        //            }
+        //        }
+        //    }
+
+        //    if (data.Values.All(string.IsNullOrEmpty))
+        //        return new();
+
+        //    result.Add(data);
+        //    return result;
+        //}
+
+        private List<Dictionary<string, string?>> ExtractPdf(
+    string filePath,
+    List<string> mappingFields)
         {
-            var result = new List<Dictionary<string, string>>();
+            if (mappingFields == null || mappingFields.Count == 0)
+                return new();
 
-            // Load the PDF document
-            using FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read);
-            using PdfLoadedDocument pdfDocument = new PdfLoadedDocument(fs);
+            // -----------------------------
+            // Normalize mapping fields
+            // -----------------------------
+            var mappingList = mappingFields
+                .Select(m => m.Trim())
+                .Where(m => !string.IsNullOrEmpty(m))
+                .ToList();
 
-            // Extract text from all pages
-            StringBuilder fullTextBuilder = new StringBuilder();
+            var normalizedMapping = mappingList
+                .ToDictionary(m => NormalizeKey(m), m => m);
+
+            var result = mappingList
+                .ToDictionary(m => m, _ => (string?)null);
+
+            using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+            using var pdfDocument = new PdfLoadedDocument(fs);
+
+            var allLines = new List<string>();
+
+            // ==============================
+            // 1️⃣ Collect ALL lines from ALL pages
+            // ==============================
             foreach (PdfLoadedPage page in pdfDocument.Pages)
             {
-                fullTextBuilder.AppendLine(page.ExtractText());
+                var text = page.ExtractText();
+
+                var lines = text
+                    .Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries)
+                    .Select(CleanText)
+                    .Where(l => !string.IsNullOrWhiteSpace(l))
+                    .ToList();
+
+                allLines.AddRange(lines);
             }
 
-            string fullText = fullTextBuilder.ToString();
-
-            // Normalize whitespace
-            fullText = Regex.Replace(fullText, @"\s+", " ").Trim();
-
-            var data = new Dictionary<string, string>();
-
-            foreach (var field in mappingFields)
+            // ==============================
+            // 2️⃣ Field : Value (same line)
+            // ==============================
+            foreach (var line in allLines)
             {
-                string value = ExtractFieldValue(fullText, field);
-                if (!string.IsNullOrWhiteSpace(value))
-                    data[field] = value;
+                var normalizedLine = NormalizeKey(line);
+
+                foreach (var map in normalizedMapping)
+                {
+                    if (result[map.Value] != null)
+                        continue;
+
+                    var colonIndex = line.IndexOf(':');
+                    if (colonIndex > 0 && normalizedLine.StartsWith(map.Key))
+                    {
+                        var value = line[(colonIndex + 1)..].Trim();
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            result[map.Value] = value;
+                        }
+                    }
+                }
             }
 
-            if (data.Count > 0)
-                result.Add(data);
+            // ==============================
+            // 3️⃣ Field line → next line value
+            // ==============================
+            for (int i = 0; i < allLines.Count - 1; i++)
+            {
+                var currentLine = allLines[i];
+                var nextLine = allLines[i + 1];
 
-            return result;
+                var currentNorm = NormalizeKey(currentLine);
+
+                foreach (var map in normalizedMapping)
+                {
+                    if (result[map.Value] != null)
+                        continue;
+
+                    if (currentNorm == map.Key &&
+                        !nextLine.Contains(":") &&
+                        !string.IsNullOrWhiteSpace(nextLine))
+                    {
+                        result[map.Value] = nextLine.Trim();
+                    }
+                }
+            }
+
+            // ==============================
+            // 4️⃣ TABLE HANDLING (GENERIC)
+            // ==============================
+            for (int i = 0; i < allLines.Count - 1; i++)
+            {
+                var headerCols = SplitColumns(allLines[i]);
+                var valueCols = SplitColumns(allLines[i + 1]);
+
+                // ------------------------------
+                // CASE 1️⃣ LEFT → RIGHT TABLE
+                // ------------------------------
+                if (headerCols.Count == 2)
+                {
+                    var keyNorm = NormalizeKey(headerCols[0]);
+                    var value = headerCols[1];
+
+                    foreach (var map in normalizedMapping)
+                    {
+                        if (result[map.Value] != null)
+                            continue;
+
+                        if (keyNorm == map.Key || keyNorm.Contains(map.Key))
+                        {
+                            result[map.Value] =
+                                string.IsNullOrWhiteSpace(value) ? null : value;
+                            break;
+                        }
+                    }
+                }
+
+                // ------------------------------
+                // CASE 2️⃣ HEADER → VALUE TABLE
+                // ------------------------------
+                if (IsHeaderRow(headerCols, valueCols))
+                {
+                    for (int c = 0; c < headerCols.Count && c < valueCols.Count; c++)
+                    {
+                        var headerNorm = NormalizeKey(headerCols[c]);
+                        var value = valueCols[c];
+
+                        foreach (var map in normalizedMapping)
+                        {
+                            if (result[map.Value] != null)
+                                continue;
+
+                            if (headerNorm == map.Key || headerNorm.Contains(map.Key))
+                            {
+                                result[map.Value] =
+                                    string.IsNullOrWhiteSpace(value) ? null : value;
+                                break;
+                            }
+                        }
+                    }
+
+                    break;
+                }
+            }
+
+            // ==============================
+            // 5️⃣ FINAL REGEX FALLBACK
+            // ==============================
+            foreach (var map in normalizedMapping)
+            {
+                if (result[map.Value] != null)
+                    continue;
+
+                var regex = new Regex(
+                    $@"{Regex.Escape(map.Value)}\s*[:\-]?\s*(.+)",
+                    RegexOptions.IgnoreCase);
+
+                foreach (var line in allLines)
+                {
+                    var match = regex.Match(line);
+                    if (match.Success)
+                    {
+                        result[map.Value] = match.Groups[1].Value.Trim();
+                        break;
+                    }
+                }
+            }
+
+            // ==============================
+            // 6️⃣ Ensure NULLs (Excel-safe)
+            // ==============================
+            foreach (var key in mappingList)
+            {
+                if (string.IsNullOrWhiteSpace(result[key]))
+                {
+                    result[key] = null;
+                }
+            }
+
+            if (result.Values.All(v => v == null))
+                return new();
+
+            return new List<Dictionary<string, string?>> { result };
         }
-        private string ExtractFieldValue(string text, string fieldName)
+
+        private List<string> SplitColumns(string line)
         {
-            if (string.IsNullOrWhiteSpace(text) || string.IsNullOrWhiteSpace(fieldName))
-                return "";
-
-            string pattern = $@"{Regex.Escape(fieldName)}\s*[:\-]?\s*(.+?)(?=\s+[A-Z][a-zA-Z ]{{2,}}|\s*$)";
-
-            var match = Regex.Match(text, pattern, RegexOptions.IgnoreCase);
-
-            if (match.Success)
-                return match.Groups[1].Value.Trim();
-
-            return "";
+            return Regex.Split(line, @"\s{2,}")
+                .Select(CleanText)
+                .Where(c => !string.IsNullOrWhiteSpace(c))
+                .ToList();
         }
 
-        private List<Dictionary<string, string>> ExtractWord(string filePath, List<string> mappingFields)
+        private bool IsHeaderRow(List<string> headers, List<string> values)
+        {
+            if (headers.Count < 2 || headers.Count != values.Count)
+                return false;
+
+            bool headersLookLikeHeaders = headers.All(h =>
+                h.Length <= 40 &&
+                h.Any(char.IsLetter) &&
+                !Regex.IsMatch(h, @"\d{3,}"));
+
+            bool valuesLookLikeValues = values.Any(v =>
+                v.Length > 15 ||
+                Regex.IsMatch(v, @"\d") ||
+                v.Contains("@"));
+
+            return headersLookLikeHeaders && valuesLookLikeValues;
+        }
+
+        private bool IsMostlyHeaders(List<string> columns)
+        {
+            return columns.All(c =>
+                c.Any(char.IsLetter) &&
+                !Regex.IsMatch(c, @"\d"));
+        }
+
+        private List<Dictionary<string, string>> ExtractWord( string filePath, List<string> mappingFields)
         {
             if (mappingFields == null || mappingFields.Count == 0)
                 return new();
@@ -232,18 +454,186 @@ namespace DataScrapper.Backend.Controllers
             var body = doc.MainDocumentPart?.Document?.Body;
             if (body == null) return new();
 
-            var table = body.Descendants<Table>().FirstOrDefault();
-            if (table == null) return new();
+            // ==============================
+            // 1️⃣ Primary extraction (WORKING)
+            // ==============================
+            foreach (var table in body.Descendants<Table>())
+            {
+                var rows = table.Elements<TableRow>().ToList();
+                if (rows.Count < 2) continue;
 
+                var firstRowCellCount = rows[0].Elements<TableCell>().Count();
+
+                if (firstRowCellCount == 2)
+                {
+                    ExtractLeftRightTable(rows, normalizedMapping, result);
+                }
+            }
+
+            // ==============================
+            // 2️⃣ FALLBACK extraction
+            // ==============================
+            FallbackScanDocumentForMappings(body, normalizedMapping, result);
+
+            if (result.Values.All(string.IsNullOrEmpty))
+                return new();
+
+            return new List<Dictionary<string, string>> { result };
+        }
+
+
+        // ================= HELPERS =================
+
+        private void FallbackScanDocumentForMappings(
+            Body body,
+            Dictionary<string, string> normalizedMapping,
+            Dictionary<string, string> result)
+        {
+            foreach (var table in body.Descendants<Table>())
+            {
+                var rows = table.Elements<TableRow>().ToList();
+                if (rows.Count < 2)
+                    continue;
+
+                // Identify header row (first row with multiple non-empty cells)
+                var headerRowIndex = -1;
+
+                for (int r = 0; r < rows.Count; r++)
+                {
+                    var cells = rows[r].Elements<TableCell>()
+                        .Select(c => CleanText(c.InnerText))
+                        .Where(t => !string.IsNullOrWhiteSpace(t))
+                        .ToList();
+
+                    if (cells.Count >= 2)
+                    {
+                        headerRowIndex = r;
+                        break;
+                    }
+                }
+
+                if (headerRowIndex == -1 || headerRowIndex + 1 >= rows.Count)
+                    continue;
+
+                var headerCells = rows[headerRowIndex].Elements<TableCell>().ToList();
+
+                // Find the FIRST data row below header that has real values
+                TableRow dataRow = null;
+                for (int r = headerRowIndex + 1; r < rows.Count; r++)
+                {
+                    var hasValue = rows[r].Elements<TableCell>()
+                        .Any(c => !string.IsNullOrWhiteSpace(CleanText(c.InnerText)));
+
+                    if (hasValue)
+                    {
+                        dataRow = rows[r];
+                        break;
+                    }
+                }
+
+                if (dataRow == null)
+                    continue;
+
+                var valueCells = dataRow.Elements<TableCell>().ToList();
+
+                // Map header → value by COLUMN INDEX
+                for (int c = 0; c < headerCells.Count && c < valueCells.Count; c++)
+                {
+                    var headerText = CleanText(headerCells[c].InnerText);
+                    var normalizedHeader = NormalizeKey(headerText);
+
+                    var valueText = CleanText(valueCells[c].InnerText);
+                    if (string.IsNullOrWhiteSpace(valueText))
+                        continue;
+
+                    foreach (var map in normalizedMapping)
+                    {
+                        if (!string.IsNullOrEmpty(result[map.Value]))
+                            continue;
+
+                        if (normalizedHeader == map.Key ||
+                            normalizedHeader.Contains(map.Key))
+                        {
+                            result[map.Value] = valueText;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            // Paragraph fallback ONLY for fields still empty
+            FallbackParagraphScan(body, normalizedMapping, result);
+        }
+
+        private void FallbackParagraphScan(
+            Body body,
+            Dictionary<string, string> normalizedMapping,
+            Dictionary<string, string> result)
+        {
+            var paragraphs = body
+                .Descendants<Paragraph>()
+                .Select(p => CleanText(p.InnerText))
+                .Where(t => !string.IsNullOrWhiteSpace(t))
+                .ToList();
+
+            for (int i = 0; i < paragraphs.Count; i++)
+            {
+                var rawLine = paragraphs[i];
+                var normalizedLine = NormalizeKey(rawLine);
+
+                foreach (var map in normalizedMapping)
+                {
+                    if (!string.IsNullOrEmpty(result[map.Value]))
+                        continue;
+
+                    if (!(normalizedLine == map.Key || normalizedLine.StartsWith(map.Key)))
+                        continue;
+
+                    // RIGHT of colon
+                    int colonIndex = rawLine.IndexOf(':');
+                    if (colonIndex >= 0)
+                    {
+                        var rightValue = rawLine[(colonIndex + 1)..].Trim();
+                        if (!string.IsNullOrWhiteSpace(rightValue))
+                        {
+                            result[map.Value] = rightValue;
+                            break;
+                        }
+                    }
+                    // BELOW paragraph
+                    else if (i + 1 < paragraphs.Count)
+                    {
+                        var nextLine = paragraphs[i + 1];
+                        if (nextLine.Contains(':'))
+                            continue;
+
+                        result[map.Value] = nextLine;
+                        break;
+                    }
+                }
+            }
+        }
+
+
+        private static string CleanText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return string.Empty;
+            text = text.Replace('\u00A0', ' ');
+            text = Regex.Replace(text, @"\s+", " ");
+            return text.Trim();
+        }
+
+
+        private void ExtractLeftRightTable( List<TableRow> rows, Dictionary<string, string> normalizedMapping, Dictionary<string, string> result)
+        {
             string lastMatchedField = null;
 
-            foreach (var row in table.Elements<TableRow>().Skip(1)) // skip header row
+            foreach (var row in rows.Skip(1))
             {
                 var cells = row.Elements<TableCell>().ToList();
                 if (cells.Count < 2) continue;
 
                 var label = CleanCell(cells[0]);
-
                 var value = string.Join(" ",
                     cells.Skip(1).Select(c => CleanCell(c))
                 ).Trim();
@@ -272,11 +662,6 @@ namespace DataScrapper.Backend.Controllers
                     }
                 }
             }
-
-            if (result.Values.All(string.IsNullOrEmpty))
-                return new();
-
-            return new List<Dictionary<string, string>> { result };
         }
 
 

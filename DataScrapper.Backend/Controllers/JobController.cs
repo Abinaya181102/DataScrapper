@@ -48,6 +48,26 @@ namespace DataScrapper.Backend.Controllers
             return job;
         }
 
+        //GET : api/jobs/user/1
+        [HttpGet("user/{userId}")]
+        public async Task<ActionResult<IEnumerable<Job>>> GetJobsByUserId(long userId)
+        {
+            var jobs = await _context.Jobs
+                .Where(j => j.user_id == userId)
+                .Include(j => j.JobFiles)
+                .Include(j => j.Users)
+                .Include(j => j.Mappings)
+                .ToListAsync();
+
+            if (jobs == null || jobs.Count == 0)
+            {
+                return NotFound("No jobs found for this user");
+            }
+
+            return Ok(jobs);
+        }
+
+
         // POST: api/Jobs
         [HttpPost]
         public async Task<ActionResult<Job>> CreateJob([FromBody] Job job)

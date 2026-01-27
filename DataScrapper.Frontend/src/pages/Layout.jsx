@@ -1,33 +1,33 @@
-import React from "react";
+// pages/Layout.jsx
 import { Outlet, useNavigate } from "react-router-dom";
 import {
-  AppBar,
-  Toolbar,
+  Box,
+  Drawer,
+  List,
+  ListItemButton,
+  ListItemIcon,
+  ListItemText,
   Typography,
   Button,
-  Box,
-  IconButton,
-  Avatar,
-  Menu,
-  MenuItem
+  Divider
 } from "@mui/material";
-import PersonIcon from "@mui/icons-material/Person";
+import DashboardIcon from "@mui/icons-material/Dashboard";
+import MapIcon from "@mui/icons-material/Map";
+import UploadFileIcon from "@mui/icons-material/UploadFile";
+import ListAltIcon from "@mui/icons-material/ListAlt";
+import LogoutIcon from "@mui/icons-material/Logout";
+
+const drawerWidth = 260;
 
 const Layout = () => {
   const navigate = useNavigate();
 
-  const [anchorEl, setAnchorEl] = React.useState(null);
-  const [username, setUsername] = React.useState("");
-
-  const openMenu = Boolean(anchorEl);
-
-  React.useEffect(() => {
-    const user = JSON.parse(localStorage.getItem("user"));
-    if (user?.user_name) setUsername(user.user_name);
-  }, []);
-
-  const handleMenuOpen = (e) => setAnchorEl(e.currentTarget);
-  const handleMenuClose = () => setAnchorEl(null);
+  const menuItems = [
+    { label: "Dashboard", path: "/dashboard", icon: <DashboardIcon /> },
+    { label: "Mapping", path: "/mapping", icon: <MapIcon /> },
+    { label: "Upload Files", path: "/upload", icon: <UploadFileIcon /> },
+    { label: "Process Logs", path: "/logs", icon: <ListAltIcon /> },
+  ];
 
   const handleLogout = () => {
     localStorage.clear();
@@ -35,52 +35,109 @@ const Layout = () => {
   };
 
   return (
-    <>
-      {/* ---------- NAVBAR ----------- */}
-      <AppBar position="static">
-        <Toolbar sx={{ display: "flex", justifyContent: "space-between" }}>
-          {/* Left: Title */}
-          <Typography variant="h6">DataScrapper</Typography>
+    <Box sx={{ display: "flex", height: "100vh", fontFamily: "'Roboto', sans-serif" }}>
+      {/* LEFT NAVBAR */}
+      <Drawer
+        variant="permanent"
+        sx={{
+          width: drawerWidth,
+          flexShrink: 0,
+          "& .MuiDrawer-paper": {
+            width: drawerWidth,
+            backgroundColor: "#000",
+            color: "#fff", // text color white
+            boxSizing: "border-box"
+          }
+        }}
+      >
+        <Box sx={{ p: 3 }}>
+          <Typography
+            variant="h6"
+            sx={{ color: "#fff", fontWeight: 600, fontFamily: "'Roboto', sans-serif" }}
+          >
+            Data Scrapper
+          </Typography>
+        </Box>
 
-          {/* Center: Upload Button */}
-          <Box sx={{ position: "absolute", left: "50%", transform: "translateX(-50%)" }}>
-            <Button
-              color="inherit"
-              sx={{ textTransform: "none", fontSize: "1rem" }}
-              onClick={() => navigate("/upload")}
+        <Divider sx={{ backgroundColor: "#222" }} />
+
+        <List sx={{ mt: 2 }}>
+          {menuItems.map((item) => (
+            <ListItemButton
+              key={item.label}
+              onClick={() => navigate(item.path)}
+              sx={{
+                mb: 1.5,
+                borderRadius: 2,
+                px: 3,
+                py: 1.5,
+                display: "flex",
+                alignItems: "center",
+                gap: 2,
+                fontSize: "0.875rem",
+                fontWeight: 500,
+                color: "#fff", // text color white
+                transition: "all 0.2s",
+                "&:hover": {
+                  backgroundColor: "#222",
+                  color: "#fff"
+                }
+              }}
             >
-              Upload File
-            </Button>
-          </Box>
+              <ListItemIcon sx={{ color: "inherit", minWidth: "35px" }}>
+                {item.icon}
+              </ListItemIcon>
+              <ListItemText primary={item.label} />
+            </ListItemButton>
+          ))}
+        </List>
 
-          {/* Right: Profile */}
-          <Box sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-            <Typography variant="h6">{username}</Typography>
+        <Box sx={{ flexGrow: 1 }} />
 
-            <IconButton onClick={handleMenuOpen} color="inherit">
-              <Avatar sx={{ width: 32, height: 32 }}>
-                <PersonIcon />
-              </Avatar>
-            </IconButton>
+        {/* LOGOUT */}
+        <Box sx={{ p: 2 }}>
+          <Button
+            fullWidth
+            variant="outlined"
+            startIcon={<LogoutIcon />}
+            onClick={handleLogout}
+            sx={{
+              color: "#fff",
+              borderColor: "#fff",
+              "&:hover": {
+                backgroundColor: "red",
+                color: "#fff",
+                borderColor: "red"
+              }
+            }}
+          >
+            Sign out
+          </Button>
+        </Box>
+      </Drawer>
 
-            <Menu
-              anchorEl={anchorEl}
-              open={openMenu}
-              onClose={handleMenuClose}
-              anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-              transformOrigin={{ vertical: "top", horizontal: "right" }}
+      {/* PAGE CONTENT */}
+       <Box
+            component="main"
+            sx={{
+                flexGrow: 1,
+                overflowY: "auto",
+                backgroundColor: "#f5f5f5",
+                p: 4,
+
+                /* Hide scrollbar */
+                scrollbarWidth: "none",        // Firefox
+                msOverflowStyle: "none",       // IE / Edge
+                "&::-webkit-scrollbar": {
+                display: "none",             // Chrome, Safari
+                },
+            }}
             >
-              <MenuItem onClick={handleLogout}>Logout</MenuItem>
-            </Menu>
-          </Box>
-        </Toolbar>
-      </AppBar>
+            <Outlet />
+        </Box>
 
-      {/* ---------- PAGE CONTENT ----------- */}
-      <Outlet />
-    </>
+    </Box>
   );
 };
 
 export default Layout;
-
