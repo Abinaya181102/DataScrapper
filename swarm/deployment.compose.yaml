@@ -1,0 +1,30 @@
+version: "3.9"
+
+services:
+
+  backend:
+    image: ds-backend
+    deploy:
+      replicas: 2
+    networks:
+      - app_net
+
+  frontend:
+    image: ds-frontend
+    deploy:
+      replicas: 2
+    networks:
+      - app_net
+
+  nginx:
+    image: ds-nginx
+    ports:
+      - "80:80"
+    deploy:
+      replicas: 1
+    networks:
+      - app_net
+
+networks:
+  app_net:
+    driver: overlay
