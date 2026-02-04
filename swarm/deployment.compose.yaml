@@ -1,30 +1,214 @@
-version: "3.9"
+# version: "3.8"
+
+# services:
+#   backend:
+#     image: ds-backend:latest
+#     environment:
+#       ASPNETCORE_URLS: http://+:5156
+#       ConnectionStrings__DefaultConnection: >
+#         Server=sqlserver,1433;
+#         Database=DataScrapper;
+#         User Id=sa;
+#         Password=Qwerty@1234;
+#         TrustServerCertificate=True;
+#     deploy:
+#       replicas: 2
+#       restart_policy:
+#         condition: on-failure
+#     networks:
+#       - app_net
+
+#   frontend:
+#     image: ds-frontend:latest
+#     deploy:
+#       replicas: 2
+#       restart_policy:
+#         condition: on-failure
+#     networks:
+#       - app_net
+
+#   nginx:
+#     image: ds-nginx:latest
+#     ports:
+#       - target: 80
+#         published: 8080
+#         protocol: tcp
+#         mode: ingress
+#     deploy:
+#       replicas: 1
+#     networks:
+#       - app_net
+
+#   sqlserver:
+#     image: mcr.microsoft.com/mssql/server:2022-latest
+#     environment:
+#       ACCEPT_EULA: "Y"
+#       SA_PASSWORD: "Qwerty@1234"
+#     deploy:
+#       replicas: 1
+#       placement:
+#         constraints:
+#           - node.role == manager
+#     networks:
+#       - app_net
+
+# networks:
+#   app_net:
+#     driver: overlay
+#     attachable: true
+
+# version: "3.8"
+
+# services:
+#   backend:
+#     image: ds-backend:latest
+#     environment:
+#       ASPNETCORE_URLS: http://+:5156
+#       ConnectionStrings__DefaultConnection: >
+#         Server=sqlserver,1433;
+#         Database=DataScrapper;
+#         User Id=sa;
+#         Password=Qwerty@1234;
+#         TrustServerCertificate=True;
+#     deploy:
+#       replicas: 2
+#       restart_policy:
+#         condition: on-failure
+#     networks:
+#       - app_net
+
+#   frontend:
+#     image: ds-frontend:latest
+#     deploy:
+#       replicas: 2
+#       restart_policy:
+#         condition: on-failure
+#     networks:
+#       - app_net
+
+#   nginx:
+#     image: ds-nginx:latest
+#     ports:
+#       - "8080:80"
+#     deploy:
+#       replicas: 1
+#     networks:
+#       - app_net
+
+#   sqlserver:
+#     image: mcr.microsoft.com/mssql/server:2022-latest
+#     environment:
+#       ACCEPT_EULA: "Y"
+#       SA_PASSWORD: "Qwerty@1234"
+#     deploy:
+#       replicas: 1
+#       placement:
+#         constraints:
+#           - node.role == manager
+#     networks:
+#       - app_net
+
+# networks:
+#   app_net:
+#     driver: overlay
+#     attachable: true
+
+# version: "3.8"
+
+# services:
+#   backend:
+#     image: ds-backend:latest
+#     environment:
+#       ASPNETCORE_URLS: http://+:5156
+#       ConnectionStrings__DefaultConnection: >
+#         Server=sqlserver,1433;
+#         Database=DataScrapper;
+#         User Id=sa;
+#         Password=Qwerty@1234;
+#         TrustServerCertificate=True;
+#     deploy:
+#       replicas: 2
+#       restart_policy:
+#         condition: on-failure
+#     networks:
+#       - app_net
+
+#   frontend:
+#     image: ds-frontend:latest
+#     deploy:
+#       replicas: 2
+#       restart_policy:
+#         condition: on-failure
+#     networks:
+#       - app_net
+
+#   nginx:
+#     image: ds-nginx:latest
+#     ports:
+#       - "8080:80"
+#     deploy:
+#       replicas: 1
+#     networks:
+#       - app_net
+
+#   sqlserver:
+#     image: mcr.microsoft.com/mssql/server:2022-latest
+#     environment:
+#       ACCEPT_EULA: "Y"
+#       SA_PASSWORD: "Qwerty@1234"
+#     deploy:
+#       replicas: 1
+#       placement:
+#         constraints:
+#           - node.role == manager
+#     networks:
+#       - app_net
+
+# networks:
+#   app_net:
+#     driver: overlay
+#     attachable: true
+
+version: "3.8"
 
 services:
-
   backend:
-    image: ds-backend
+    image: ds-backend:latest
     deploy:
       replicas: 2
     networks:
       - app_net
 
   frontend:
-    image: ds-frontend
+    image: ds-frontend:latest
     deploy:
       replicas: 2
     networks:
       - app_net
 
   nginx:
-    image: ds-nginx
+    image: ds-nginx:latest
     ports:
-      - "80:80"
+      - "8080:80"
     deploy:
       replicas: 1
+    networks:
+      - app_net
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    environment:
+      ACCEPT_EULA: "Y"
+      SA_PASSWORD: "Qwerty@1234"
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
     networks:
       - app_net
 
 networks:
   app_net:
     driver: overlay
+    attachable: true

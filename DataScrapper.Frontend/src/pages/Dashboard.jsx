@@ -90,7 +90,7 @@ const Dashboard = () => {
   useEffect(() => {
     const fetchJobFiles = async () => {
       try {
-        const response = await axios.get("http://localhost:5229/api/JobFile");
+        const response = await axios.get("/api/JobFile");
         const completedFiles = response.data.filter(
           (file) => file.status?.toLowerCase() === "completed"
         );

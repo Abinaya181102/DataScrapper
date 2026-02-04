@@ -62,7 +62,7 @@ export default function Logs() {
       setLoading(true);
 
       const res = await axios.get(
-        `http://localhost:5229/api/jobs/user/${userId}`
+        `/api/jobs/user/${userId}`
       );
 
       setJobs(Array.isArray(res.data) ? res.data : []);

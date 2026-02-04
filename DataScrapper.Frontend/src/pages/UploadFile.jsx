@@ -283,7 +283,7 @@ const UploadFile = () => {
     try {
       const user = JSON.parse(localStorage.getItem("user"));
       const res = await axios.get(
-        `http://localhost:5229/api/mapping?userId=${user?.user_id}`
+        `/api/mapping?userId=${user?.user_id}`
       );
       setExistingMappings(res.data || []);
     } catch {
@@ -385,7 +385,7 @@ const UploadFile = () => {
     const user = JSON.parse(localStorage.getItem("user"));
 
     // Create Job
-    const jobRes = await axios.post("http://localhost:5229/api/Jobs", {
+    const jobRes = await axios.post("/api/Jobs", {
       user_id: user.user_id,
       mapping_id: selectedMappingId,
       uploaded_file_count: selectedFiles.length,
@@ -407,7 +407,7 @@ const UploadFile = () => {
     formData.append("mappingJson", JSON.stringify(jsonFields));
 
     const res = await axios.post(
-      "http://localhost:5229/api/JobFile/upload",
+      "/api/JobFile/upload",
       formData,
       { responseType: "blob" }
     );
@@ -416,7 +416,7 @@ const UploadFile = () => {
     setExcelBlob(res.data);
 
     // Update job status
-    await axios.put(`http://localhost:5229/api/Jobs/${createdJobId}`, {
+    await axios.put(`/api/Jobs/${createdJobId}`, {
       job_id: createdJobId,
       status: "completed",
       completed_at: new Date().toISOString()
@@ -435,7 +435,7 @@ const UploadFile = () => {
     console.error(error);
 
     if (jobId) {
-      await axios.put(`http://localhost:5229/api/Jobs/${jobId}`, {
+      await axios.put(`/api/Jobs/${jobId}`, {
         job_id: jobId,
         status: "failed",
         error_message: "File extraction failed"

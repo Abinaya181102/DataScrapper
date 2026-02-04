@@ -15,7 +15,7 @@ function Signup() {
     setMsg("");
 
     try {
-      await axios.post("http://localhost:5229/api/user/signup", {
+      await axios.post("/api/user/signup", {
         user_name: username,
         email: email,
         password_hash: password,

@@ -648,7 +648,7 @@ const MappingPage = () => {
     if (!userId) return;
 
     const res = await axios.get(
-      `http://localhost:5229/api/mapping?userId=${userId}`
+      `/api/mapping?userId=${userId}`
     );
     setExistingMappings(res.data);
   };
@@ -721,11 +721,11 @@ const addEmptyField = () => {
 
     if (selectedMappingId) {
       await axios.put(
-        `http://localhost:5229/api/mapping/${selectedMappingId}?userId=${userId}`,
+        `/api/mapping/${selectedMappingId}?userId=${userId}`,
         payload
       );
     } else {
-      await axios.post("http://localhost:5229/api/mapping", payload);
+      await axios.post("/api/mapping", payload);
     }
 
     resetForm();
