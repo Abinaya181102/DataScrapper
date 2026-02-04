@@ -1,6 +1,5 @@
 name: Build and Push Docker Images
 
-# Trigger on push to your branch
 on:
   push:
     branches:
@@ -8,47 +7,46 @@ on:
 
 jobs:
   docker-build:
-    name: Build and Push Docker Images
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout your code
+      # 1️⃣ Checkout repo
       - name: Checkout repository
         uses: actions/checkout@v3
 
-      # Step 2: Log in to Docker Hub
+      # 2️⃣ Log in to Docker Hub
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      # Step 3: Build backend Docker image
+      # 3️⃣ Build backend Docker image
       - name: Build Backend Docker Image
         run: |
           docker build -t ${{ secrets.DOCKER_USERNAME }}/ds-backend:latest ./DataScrapper.Backend
 
-      # Step 4: Push backend image
+      # 4️⃣ Push backend image
       - name: Push Backend Docker Image
         run: |
           docker push ${{ secrets.DOCKER_USERNAME }}/ds-backend:latest
 
-      # Step 5: Build frontend Docker image
-      - name: Build Frontend Docker Image
+      # 5️⃣ Build frontend dist
+      - name: Build Frontend
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/ds-frontend:latest ./DataScrapper.Frontend
+          cd DataScrapper.Frontend
+          npm install
+          npm run build
+          # Copy the dist folder into nginx directory
+          cp -r dist ../nginx/dist
+          cd ..
 
-      # Step 6: Push frontend image
-      - name: Push Frontend Docker Image
-        run: |
-          docker push ${{ secrets.DOCKER_USERNAME }}/ds-frontend:latest
-
-      # Step 7: Build nginx Docker image
+      # 6️⃣ Build NGINX Docker image (with frontend dist)
       - name: Build Nginx Docker Image
         run: |
-          docker build -t ${{ secrets.DOCKER_USERNAME }}/ds-nginx:latest ./nginx
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/ds-frontend:latest ./nginx
 
-      # Step 8: Push nginx image
+      # 7️⃣ Push NGINX image
       - name: Push Nginx Docker Image
         run: |
-          docker push ${{ secrets.DOCKER_USERNAME }}/ds-nginx:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/ds-frontend:latest
