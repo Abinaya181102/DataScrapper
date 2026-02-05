@@ -6,7 +6,7 @@ using System.Text.Json.Serialization;
 
 namespace DataScrapper.Backend.Models
 {
-    [Table("jobFiles")]
+    [Table("job_files")]
     public class JobFile
     {
         [Key]

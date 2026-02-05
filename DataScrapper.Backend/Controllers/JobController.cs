@@ -123,6 +123,58 @@ namespace DataScrapper.Backend.Controllers
             return NoContent();
         }
 
+        [HttpGet("stats/success-rate")]
+        public async Task<IActionResult> GetJobSuccessRate()
+        {
+            var totalJobs = await _context.Jobs.CountAsync();
+
+            if (totalJobs == 0)
+            {
+                return Ok(new
+                {
+                    totalJobs = 0,
+                    completedJobs = 0,
+                    successRate = 0
+                });
+            }
+
+            var completedJobs = await _context.Jobs
+                .CountAsync(j => j.status == "completed");
+
+            var successRate = Math.Round(
+                (double)completedJobs / totalJobs * 100,
+                2
+            );
+
+            return Ok(new
+            {
+                totalJobs,
+                completedJobs,
+                successRate
+            });
+        }
+
+        [HttpGet("stats/dashboard")]
+        public async Task<IActionResult> GetDashboardStats()
+        {
+            var totalJobs = await _context.Jobs.CountAsync();
+            var completedJobs = await _context.Jobs
+                .CountAsync(j => j.status == "completed");
+
+            var totalMappings = await _context.Mappings.CountAsync();
+
+            var successRate = totalJobs == 0
+                ? 0
+                : Math.Round((double)completedJobs / totalJobs * 100, 2);
+
+            return Ok(new
+            {
+                totalJobs,
+                completedJobs,
+                totalMappings,
+                successRate
+            });
+        }
         private bool JobExists(long id)
         {
             return _context.Jobs.Any(e => e.job_id == id);

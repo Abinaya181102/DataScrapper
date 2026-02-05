@@ -84,24 +84,81 @@ const ActionCard = ({ icon, title, description }) => (
   </Paper>
 );
 
+const fetchSuccessRate = async () => {
+  const res = await axios.get(
+    "http://localhost:5229/api/Jobs/stats/success-rate"
+  );
+  return res.data;
+};
+
+const fetchDashboardStats = async () => {
+  const res = await axios.get(
+    "http://localhost:5229/api/Jobs/stats/dashboard"
+  );
+  return res.data;
+};
+
 const Dashboard = () => {
   const [filesProcessed, setFilesProcessed] = useState(0);
+  const [successRate, setSuccessRate] = useState(0);
+  const [stats, setStats] = useState({
+  totalJobs: 0,
+  totalMappings: 0,
+  successRate: 0,
+});
+ 
+ 
+    useEffect(() => {
+      fetchDashboardStats()
+        .then(data => {
+          console.log("Dashboard stats:", data);
+          setStats({
+            totalJobs: data?.totalJobs ?? 0,
+            totalMappings: data?.totalMappings ?? 0,
+            successRate: data?.successRate ?? 0,
+          });
+        })
+        .catch(err => {
+          console.error("Dashboard stats error", err);
+        });
+    }, []);
+
+
+    useEffect(() => {
+    fetchSuccessRate()
+    .then(data => {
+      console.log("Success rate API response:", data);
+      setSuccessRate(data?.successRate ?? 0);
+    })
+    .catch(err => {
+      console.error("Success rate API error", err);
+      setSuccessRate(0);
+    });
+}, []);
 
   useEffect(() => {
-    const fetchJobFiles = async () => {
-      try {
-        const response = await axios.get("http://localhost:5229/api/JobFile");
-        const completedFiles = response.data.filter(
-          (file) => file.status?.toLowerCase() === "completed"
-        );
-        setFilesProcessed(completedFiles.length);
-      } catch (error) {
-        console.error("Error fetching job files", error);
-      }
-    };
+  const fetchJobFiles = async () => {
+    try {
+      const userId = JSON.parse(localStorage.getItem("user"))?.user_id;
+      if (!userId) return;
 
-    fetchJobFiles();
-  }, []);
+      const response = await axios.get(
+        `http://localhost:5229/api/jobs/user/${userId}`
+      );
+
+      const completedFiles = response.data.filter(
+        (file) => file.status?.toLowerCase() === "completed"
+      );
+
+      setFilesProcessed(completedFiles.length);
+    } catch (error) {
+      console.error("Error fetching jobs for user", error);
+    }
+  };
+
+  fetchJobFiles();
+}, []);
+
 
   return (
     <Box>
@@ -126,16 +183,16 @@ const Dashboard = () => {
 
         <Grid item >
           <StatCard
-            title="Fields Mapped"
-            value={0}
+            title="Total Mappings"
+            value={stats.totalMappings}
             icon={<SettingsOutlinedIcon color="primary" />}
           />
         </Grid>
 
         <Grid item >
           <StatCard
-            title="Active Jobs"
-            value={0}
+            title="Total Jobs"
+            value={stats.totalJobs}
             icon={<ShowChartOutlinedIcon color="primary" />}
           />
         </Grid>
@@ -143,7 +200,7 @@ const Dashboard = () => {
         <Grid item >
           <StatCard
             title="Success Rate"
-            value="100%"
+            value={`${successRate}%`}
             icon={<TrendingUpOutlinedIcon color="primary" />}
           />
         </Grid>

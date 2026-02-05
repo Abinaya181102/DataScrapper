@@ -16,7 +16,7 @@ function Login() {
     try {
       const response = await axios.post("http://localhost:5229/api/user/login", {
         email: email,
-        password_hash: password,
+        password: password,
       });
 
       if (response.data.user_id) {

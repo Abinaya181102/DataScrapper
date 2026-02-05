@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using DataScrapper.Backend.Models;
+using BCrypt.Net;
 
 namespace DataScrapper.Backend.Controllers
 {
@@ -21,19 +22,34 @@ namespace DataScrapper.Backend.Controllers
         [HttpPost("signup")]
         public async Task<IActionResult> Signup([FromBody] User user)
         {
-            if (string.IsNullOrWhiteSpace(user.email) || string.IsNullOrWhiteSpace(user.password_hash))
-                return BadRequest("Email and Password are required.");
+            try
+            {
+                if (user == null || string.IsNullOrWhiteSpace(user.email) || string.IsNullOrWhiteSpace(user.password_hash))
+                    return BadRequest("Email and Password are required.");
 
-            bool exists = await _context.Users.AnyAsync(u => u.email == user.email);
-            if (exists)
-                return BadRequest("User already exists.");
+                bool exists = await _context.Users.AnyAsync(u => u.email == user.email);
+                if (exists)
+                    return BadRequest("User already exists.");
 
-            user.created_at = DateTime.Now;
+                // 🔐 Hash password
+                user.password_hash = BCrypt.Net.BCrypt.HashPassword(user.password_hash);
+                user.created_at = DateTime.UtcNow;
 
-            _context.Users.Add(user);
-            await _context.SaveChangesAsync();
+                _context.Users.Add(user);
+                await _context.SaveChangesAsync();
 
-            return Ok(new { message = "User created successfully", user.user_id });
+                // Return created user info
+                return Ok(new
+                {
+                    user.user_id,
+                    user.user_name,
+                    user.email
+                });
+            }
+            catch
+            {
+                return StatusCode(500, "Internal server error");
+            }
         }
 
         // -----------------------------
@@ -42,10 +58,16 @@ namespace DataScrapper.Backend.Controllers
         [HttpPost("login")]
         public async Task<IActionResult> Login([FromBody] Login login)
         {
-            var user = await _context.Users
-                .FirstOrDefaultAsync(u => u.email == login.email && u.password_hash == login.password_hash);
+            if (login == null)
+                return BadRequest("Login data is required.");
 
-            if (user == null)
+            if (string.IsNullOrWhiteSpace(login.email) || string.IsNullOrWhiteSpace(login.password))
+                return BadRequest("Email and Password are required.");
+
+            var user = await _context.Users
+                .FirstOrDefaultAsync(u => u.email == login.email);
+
+            if (user == null || !BCrypt.Net.BCrypt.Verify(login.password, user.password_hash))
                 return Unauthorized("Invalid email or password.");
 
             return Ok(new

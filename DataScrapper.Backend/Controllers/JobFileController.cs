@@ -1,5 +1,6 @@
 ﻿using CsvHelper;
 using DataScrapper.Backend;
+using DataScrapper.Backend.Extraction;
 using DataScrapper.Backend.Models;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -7,6 +8,9 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OfficeOpenXml; // EPPlus
+using Syncfusion.Pdf;
+using Syncfusion.Pdf.Parsing;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -16,8 +20,6 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Xceed.Words.NET; // DocX
-using Syncfusion.Pdf.Parsing;
-using Syncfusion.Pdf;
 
 namespace DataScrapper.Backend.Controllers
 {
@@ -66,9 +68,9 @@ namespace DataScrapper.Backend.Controllers
         // POST: api/JobFile/upload
         [HttpPost("upload")]
         public async Task<IActionResult> UploadFiles(
-            [FromForm] List<IFormFile> files,
-            [FromForm] long job_id,
-            [FromForm] string mappingJson)
+        [FromForm] List<IFormFile> files,
+        [FromForm] long job_id,
+        [FromForm] string mappingJson)
         {
             if (files == null || files.Count == 0)
                 return BadRequest("No files uploaded.");
@@ -88,66 +90,107 @@ namespace DataScrapper.Backend.Controllers
                 return BadRequest("Invalid mapping JSON.");
             }
 
-            var combinedExtractedData = new List<Dictionary<string, string>>();
+            var combinedExtractedData = new ConcurrentBag<Dictionary<string, string>>();
 
-            foreach (var file in files)
+            //PROCESS FILES IN BATCHES
+            foreach (var fileBatch in Batch(files, 50)) // Batch size = 50
             {
-                if (file.Length == 0)
-                    continue;
+                var jobFilesToSave = new List<JobFile>();
 
-                var tempPath = Path.Combine(
-                    Path.GetTempPath(),
-                    $"{Guid.NewGuid()}_{file.FileName}"
-                );
-
-                using (var stream = new FileStream(tempPath, FileMode.Create))
+                var parallelOptions = new ParallelOptions
                 {
-                    await file.CopyToAsync(stream);
-                }
-
-                var jobFile = new JobFile
-                {
-                    job_id = job_id,
-                    original_file_name = file.FileName,
-                    file_type = Path.GetExtension(file.FileName).ToLower(),
-                    file_url = tempPath,
-                    status = "processing",
-                    created_at = DateTime.UtcNow
+                    MaxDegreeOfParallelism = 4 // Tune based on CPU
                 };
 
-                _context.JobFiles.Add(jobFile);
-                await _context.SaveChangesAsync();
-
-                try
+                await Parallel.ForEachAsync(fileBatch, parallelOptions, async (file, ct) =>
                 {
-                    List<Dictionary<string, string>> extractedData = jobFile.file_type switch
-                    {
-                        ".pdf" => ExtractPdf(tempPath, mappingFields),
-                        ".docx" => ExtractWord(tempPath, mappingFields),
-                        ".xlsx" => ExtractExcel(tempPath, mappingFields),
-                        ".csv" => ExtractCsv(tempPath, mappingFields),
-                        _ => throw new Exception("Unsupported file type")
-                    };
+                    if (file.Length == 0)
+                        return;
 
-                    // Add source file name for traceability
-                    foreach (var row in extractedData)
+                    var tempPath = Path.Combine(
+                        Path.GetTempPath(),
+                        $"{Guid.NewGuid()}_{file.FileName}"
+                    );
+
+                    // Save file to temp folder
+                    await using (var stream = new FileStream(tempPath, FileMode.Create))
                     {
-                        row["Source File"] = file.FileName;
-                        combinedExtractedData.Add(row);
+                        await file.CopyToAsync(stream, ct);
                     }
 
-                    jobFile.status = "completed";
-                }
-                catch (Exception ex)
-                {
-                    jobFile.status = "failed";
-                    jobFile.error_message = ex.Message;
-                }
+                    var jobFile = new JobFile
+                    {
+                        job_id = job_id,
+                        original_file_name = file.FileName,
+                        file_type = Path.GetExtension(file.FileName).ToLower(),
+                        file_url = tempPath,
+                        status = "processing",
+                        created_at = DateTime.UtcNow
+                    };
 
+                    try
+                    {
+                        // Extract data based on file type
+                        List<Dictionary<string, string>> extractedData;
+
+                        switch (jobFile.file_type)
+                        {
+                            case ".pdf":
+                                extractedData = ExtractPdf(tempPath, mappingFields);
+                                break;
+
+                            case ".docx":
+                                {
+                                    IOcrService ocr = new TesseractOcrService(@"C:\tessdata");
+
+                                    var pipeline = new WordExtractionPipeline(mappingFields, ocr);
+
+                                    extractedData = pipeline.Extract(tempPath);
+                                    break;
+                                }
+
+
+                            case ".xlsx":
+                                extractedData = ExtractExcel(tempPath, mappingFields);
+                                break;
+
+                            case ".csv":
+                                extractedData = ExtractCsv(tempPath, mappingFields);
+                                break;
+
+                            default:
+                                throw new Exception("Unsupported file type");
+                        }
+
+                        // Add source file info
+                        foreach (var row in extractedData)
+                        {
+                            row["Source File"] = file.FileName;
+                            combinedExtractedData.Add(row);
+                        }
+
+                        jobFile.status = "completed";
+                    }
+                    catch (Exception ex)
+                    {
+                        jobFile.status = "failed";
+                        jobFile.error_message = ex.Message;
+                    }
+
+                    // Thread-safe add
+                    lock (jobFilesToSave)
+                    {
+                        jobFilesToSave.Add(jobFile);
+                    }
+                });
+
+                // Save DB once per batch
+                _context.JobFiles.AddRange(jobFilesToSave);
                 await _context.SaveChangesAsync();
             }
 
-            var excelBytes = GenerateExcel(combinedExtractedData);
+            // Generate final Excel
+            var excelBytes = GenerateExcel(combinedExtractedData.ToList());
 
             return File(
                 excelBytes,
@@ -156,6 +199,24 @@ namespace DataScrapper.Backend.Controllers
             );
         }
 
+        // 🔹 INLINE BATCH METHOD
+        private static IEnumerable<List<IFormFile>> Batch(List<IFormFile> files, int batchSize)
+        {
+            var batch = new List<IFormFile>(batchSize);
+
+            foreach (var file in files)
+            {
+                batch.Add(file);
+                if (batch.Count == batchSize)
+                {
+                    yield return batch;
+                    batch = new List<IFormFile>(batchSize);
+                }
+            }
+
+            if (batch.Count > 0)
+                yield return batch;
+        }
 
         #region File Extractors
 
@@ -539,7 +600,7 @@ namespace DataScrapper.Backend.Controllers
                 // Map header → value by COLUMN INDEX
                 for (int c = 0; c < headerCells.Count && c < valueCells.Count; c++)
                 {
-                    var headerText = CleanText(headerCells[c].InnerText);
+                    var headerText = CleanText(headerCells[c].InnerText).TrimEnd(':');
                     var normalizedHeader = NormalizeKey(headerText);
 
                     var valueText = CleanText(valueCells[c].InnerText);
@@ -624,7 +685,10 @@ namespace DataScrapper.Backend.Controllers
         }
 
 
-        private void ExtractLeftRightTable( List<TableRow> rows, Dictionary<string, string> normalizedMapping, Dictionary<string, string> result)
+        private void ExtractLeftRightTable(
+    List<TableRow> rows,
+    Dictionary<string, string> normalizedMapping,
+    Dictionary<string, string> result)
         {
             string lastMatchedField = null;
 
@@ -633,25 +697,27 @@ namespace DataScrapper.Backend.Controllers
                 var cells = row.Elements<TableCell>().ToList();
                 if (cells.Count < 2) continue;
 
-                var label = CleanCell(cells[0]);
+                // 🔥 FIX: remove trailing colon before normalize
+                var rawLabel = CleanCell(cells[0]).TrimEnd(':');
+                var labelNorm = NormalizeKey(rawLabel);
+
                 var value = string.Join(" ",
-                    cells.Skip(1).Select(c => CleanCell(c))
-                ).Trim();
+                    cells.Skip(1).Select(CleanCell)).Trim();
 
-                if (string.IsNullOrWhiteSpace(value)) continue;
+                if (string.IsNullOrWhiteSpace(value))
+                    continue;
 
-                if (string.IsNullOrWhiteSpace(label) && lastMatchedField != null)
+                // Handle wrapped values
+                if (string.IsNullOrWhiteSpace(labelNorm) && lastMatchedField != null)
                 {
                     result[lastMatchedField] =
                         (result[lastMatchedField] + " " + value).Trim();
                     continue;
                 }
 
-                var labelNorm = NormalizeKey(label);
-
                 foreach (var map in normalizedMapping)
                 {
-                    if (labelNorm == map.Key || labelNorm.Contains(map.Key))
+                    if (labelNorm == map.Key || labelNorm.StartsWith(map.Key))
                     {
                         if (string.IsNullOrEmpty(result[map.Value]))
                         {
@@ -663,6 +729,7 @@ namespace DataScrapper.Backend.Controllers
                 }
             }
         }
+
 
 
         // ================= HELPERS =================

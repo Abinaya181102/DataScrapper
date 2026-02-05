@@ -6,7 +6,7 @@ namespace DataScrapper.Backend.Models
 {
     public class User
     {
-        [Key]  // This tells EF Core that this is the primary key
+        [Key]
         public long user_id { get; set; }          // user_id (PK)
 
         public string user_name { get; set; }      // user_name

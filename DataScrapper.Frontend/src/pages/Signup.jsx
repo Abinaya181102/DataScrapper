@@ -25,8 +25,15 @@ function Signup() {
       setTimeout(() => navigate("/"), 1500);
 
     } catch (err) {
-      if (err.response?.data) setMsg(err.response.data);
-      else setMsg("Signup failed. Try again.");
+      const errorData = err.response?.data;
+      
+      if (typeof errorData === 'string') {
+        setMsg(errorData);
+      } else if (errorData?.message) {
+        setMsg(errorData.message); // This picks up the "User already exists" string
+      } else {
+        setMsg("Signup failed. Try again.");
+      }
     }
   };
 

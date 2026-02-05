@@ -115,14 +115,6 @@ const paginatedLogs = filteredLogs.slice(
             Monitor file processing status and view detailed extraction logs.
           </Typography>
         </Box>
-
-        <Button
-          variant="outlined"
-          startIcon={<DownloadOutlinedIcon />}
-          sx={{ height: 44, borderRadius: 2 }}
-        >
-          Export Logs
-        </Button>
       </Box>
 
       {/* STATS */}
@@ -213,7 +205,6 @@ const paginatedLogs = filteredLogs.slice(
   <Table>
     <TableHead>
       <TableRow>
-        <TableCell>Job ID</TableCell>
         <TableCell>Status</TableCell>
         <TableCell>Uploaded Files</TableCell>
         <TableCell>Error</TableCell>
@@ -224,8 +215,6 @@ const paginatedLogs = filteredLogs.slice(
     <TableBody>
       {paginatedLogs.map(job => (
         <TableRow key={job.job_id}>
-          <TableCell>{job.job_id}</TableCell>
-
           <TableCell>
             <Chip
               label={job.status}
